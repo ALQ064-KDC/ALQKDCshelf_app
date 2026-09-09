@@ -129,10 +129,15 @@
 <dialog id="settingsDialog">
   <div class="dialog-inner">
     <h3>検索先(Apps Script)の設定</h3>
-    <p>Google Apps ScriptのウェブアプリURLを貼り付けてください。このスマホ/ブラウザに保存されます。</p>
+    <p>Google Apps ScriptのウェブアプリURLを貼り付けるか、URLが書かれたテキストファイルを選択してください。このスマホ/ブラウザに保存されます。</p>
     <div class="field">
       <input type="text" id="scriptUrlInput" placeholder="https://script.google.com/macros/s/xxxx/exec">
     </div>
+    <div class="field">
+      <label>または、URLが書かれた.txtファイルを選択</label>
+      <input type="file" id="urlFileInput" accept=".txt,text/plain">
+    </div>
+    <div class="status" id="settingsStatus"></div>
     <div class="dialog-actions">
       <button class="btn-ghost" id="closeSettings">閉じる</button>
       <button class="btn-secondary" id="saveSettings">保存</button>
@@ -159,12 +164,39 @@
 
   $("openSettings").addEventListener("click", () => {
     $("scriptUrlInput").value = getScriptUrl();
+    $("urlFileInput").value = "";
+    $("settingsStatus").textContent = "";
     $("settingsDialog").showModal();
   });
   $("closeSettings").addEventListener("click", () => $("settingsDialog").close());
   $("saveSettings").addEventListener("click", () => {
     setScriptUrl($("scriptUrlInput").value.trim());
     $("settingsDialog").close();
+  });
+
+  // テキストファイルからURLを読み込む(1行目のテキストをそのまま使う)
+  $("urlFileInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    const settingsStatus = $("settingsStatus");
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result || "").trim().split(/\r?\n/)[0].trim();
+      if (!url) {
+        settingsStatus.textContent = "ファイルからURLを読み取れませんでした";
+        settingsStatus.className = "status err";
+        return;
+      }
+      $("scriptUrlInput").value = url;
+      settingsStatus.textContent = "ファイルから読み込みました。「保存」を押してください";
+      settingsStatus.className = "status";
+    };
+    reader.onerror = () => {
+      settingsStatus.textContent = "ファイルの読み込みに失敗しました";
+      settingsStatus.className = "status err";
+    };
+    reader.readAsText(file);
   });
 
   // ---------- 読み取り完了音 ----------
