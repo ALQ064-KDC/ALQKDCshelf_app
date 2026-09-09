@@ -96,12 +96,17 @@
   <div class="panel">
     <h2>カメラでJANコードを読み取る</h2>
     <div id="reader"></div>
-    <div class="field" style="margin-top:10px;">
-      <label>JANコード(手入力も可)</label>
-      <input type="text" id="janInput" placeholder="バーコードをカメラに映してください">
-    </div>
-    <button class="btn-secondary" id="restartScan">再スキャン</button>
+    <button class="btn-secondary" id="restartScan" style="margin-top:10px;">再スキャン</button>
     <div class="status" id="scanStatus">カメラの起動を待っています…</div>
+  </div>
+
+  <div class="panel">
+    <h2>手入力で検索</h2>
+    <div class="field">
+      <label>JANコード / ケースJANコード</label>
+      <input type="text" id="janInput" inputmode="numeric" placeholder="コードを入力">
+    </div>
+    <button class="btn-secondary" id="searchBtn">検索</button>
   </div>
 
   <div class="panel">
@@ -152,6 +157,34 @@
     $("settingsDialog").close();
   });
 
+  // ---------- 読み取り完了音 ----------
+  let audioCtx = null;
+  // iOSはユーザー操作なしで音を鳴らせないため、画面タップ時に一度だけ準備しておく
+  document.addEventListener("touchend", primeAudio, { once: true });
+  document.addEventListener("click", primeAudio, { once: true });
+  function primeAudio(){
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function playBeep(){
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 1500;
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.4, audioCtx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } catch (err) {
+      // 音が出せない環境では無視する
+    }
+  }
+
   // ---------- scanner ----------
   function startScanner(){
     scanStatus.textContent = "カメラの起動を待っています…";
@@ -169,6 +202,7 @@
         { fps: 10, qrbox: { width: 260, height: 140 } },
         (decodedText) => {
           if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+          playBeep();
           janInput.value = decodedText;
           scanStatus.textContent = "読み取り成功: " + decodedText;
           scanStatus.className = "status";
@@ -198,11 +232,21 @@
     }
   });
 
-  // Enterキーでの手入力にも対応
+  // 手入力: Enterキー、検索ボタンどちらでも検索できるようにする
   janInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && janInput.value.trim()) {
+      lastLookedUp = ""; // 手入力は同じ値でも再検索できるようにする
       lookup(janInput.value.trim());
     }
+  });
+  $("searchBtn").addEventListener("click", () => {
+    const v = janInput.value.trim();
+    if (!v) {
+      resultArea.innerHTML = '<p class="not-found">JANコードを入力してください</p>';
+      return;
+    }
+    lastLookedUp = "";
+    lookup(v);
   });
 
   // ---------- lookup ----------
