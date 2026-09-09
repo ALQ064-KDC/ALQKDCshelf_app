@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>棚番・商品コード検索</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{
+    --bg: #F5F3EE;
+    --panel: #FFFFFF;
+    --ink: #24272B;
+    --ink-soft: #6B7076;
+    --line: #E1DED6;
+    --accent: #1F5B4C;
+    --accent-soft: #E5EEEA;
+    --warn: #A6432B;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 16px 16px 60px; }
+  header { padding: 18px 4px 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  header h1 { font-size: 19px; margin: 0 0 2px; }
+  header p { margin: 0; font-size: 12.5px; color: var(--ink-soft); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-soft); }
+
+  #reader { width: 100%; border-radius: 8px; overflow: hidden; background:#111; }
+
+  .field { margin-bottom: 10px; }
+  .field label { display:block; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
+  .field input[type=text] {
+    width: 100%; padding: 10px 11px; font-size: 15px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: #FCFBF9; color: var(--ink);
+  }
+
+  button {
+    font-family: inherit; font-size: 14.5px; font-weight: 600;
+    border: none; border-radius: 8px; padding: 12px 14px;
+    cursor: pointer; width: 100%;
+  }
+  .btn-secondary { background: var(--accent-soft); color: var(--accent); }
+  .btn-ghost { background: transparent; color: var(--ink-soft); border: 1px solid var(--line); width:auto; padding:6px 10px; font-size:12px; }
+
+  .status { font-size: 12.5px; color: var(--ink-soft); margin-top: 8px; min-height: 16px; }
+  .status.busy { color: var(--accent); }
+  .status.err { color: var(--warn); }
+
+  .result { margin-top: 6px; }
+  .result-row {
+    display:flex; justify-content: space-between; align-items:center;
+    padding: 14px 4px; border-bottom: 1px solid var(--line);
+  }
+  .result-row:last-child { border-bottom: none; }
+  .result-label { font-size: 12.5px; color: var(--ink-soft); }
+  .result-value { font-size: 20px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .not-found { color: var(--warn); font-size: 14px; padding: 10px 4px; }
+
+  .gear-row { display:flex; justify-content: flex-end; margin-bottom: 8px; }
+
+  dialog { border:none; border-radius: 12px; padding:0; width: 92%; max-width: 420px; }
+  dialog::backdrop { background: rgba(0,0,0,0.4); }
+  .dialog-inner { padding: 18px; }
+  .dialog-inner h3 { margin-top:0; font-size:15px; }
+  .dialog-inner p { font-size: 12.5px; color: var(--ink-soft); line-height:1.5; }
+  .dialog-actions { display:flex; gap:8px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="gear-row">
+    <button class="btn-ghost" id="openSettings">検索先の設定</button>
+  </div>
+
+  <header>
+    <h1>棚番・商品コード検索</h1>
+    <p>JANコードを読み取ると、棚番と自社商品コードを表示します</p>
+  </header>
+
+  <div class="panel">
+    <h2>カメラでJANコードを読み取る</h2>
+    <div id="reader"></div>
+    <div class="field" style="margin-top:10px;">
+      <label>JANコード(手入力も可)</label>
+      <input type="text" id="janInput" placeholder="バーコードをカメラに映してください">
+    </div>
+    <button class="btn-secondary" id="restartScan">再スキャン</button>
+    <div class="status" id="scanStatus">カメラの起動を待っています…</div>
+  </div>
+
+  <div class="panel">
+    <h2>検索結果</h2>
+    <div id="resultArea"><p class="status">JANコードを読み取ると自動で検索します</p></div>
+  </div>
+
+</div>
+
+<dialog id="settingsDialog">
+  <div class="dialog-inner">
+    <h3>検索先(Apps Script)の設定</h3>
+    <p>Google Apps ScriptのウェブアプリURLを貼り付けてください。このスマホ/ブラウザに保存されます。</p>
+    <div class="field">
+      <input type="text" id="scriptUrlInput" placeholder="https://script.google.com/macros/s/xxxx/exec">
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-ghost" id="closeSettings">閉じる</button>
+      <button class="btn-secondary" id="saveSettings">保存</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const janInput = $("janInput");
+  const scanStatus = $("scanStatus");
+  const resultArea = $("resultArea");
+
+  let html5Qr = null;
+  let lastLookedUp = "";
+
+  // ---------- settings ----------
+  const SETTINGS_KEY = "lookupApp.scriptUrl";
+  const getScriptUrl = () => localStorage.getItem(SETTINGS_KEY) || "";
+  const setScriptUrl = (v) => localStorage.setItem(SETTINGS_KEY, v);
+
+  $("openSettings").addEventListener("click", () => {
+    $("scriptUrlInput").value = getScriptUrl();
+    $("settingsDialog").showModal();
+  });
+  $("closeSettings").addEventListener("click", () => $("settingsDialog").close());
+  $("saveSettings").addEventListener("click", () => {
+    setScriptUrl($("scriptUrlInput").value.trim());
+    $("settingsDialog").close();
+  });
+
+  // ---------- scanner ----------
+  function startScanner(){
+    scanStatus.textContent = "カメラの起動を待っています…";
+    scanStatus.className = "status busy";
+    html5Qr = new Html5Qrcode("reader");
+    Html5Qrcode.getCameras().then(cameras => {
+      if (!cameras || !cameras.length) {
+        scanStatus.textContent = "カメラが見つかりません";
+        scanStatus.className = "status err";
+        return;
+      }
+      const back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+      html5Qr.start(
+        back.id,
+        { fps: 10, qrbox: { width: 260, height: 140 } },
+        (decodedText) => {
+          if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+          janInput.value = decodedText;
+          scanStatus.textContent = "読み取り成功: " + decodedText;
+          scanStatus.className = "status";
+          lookup(decodedText);
+        },
+        () => {}
+      ).catch(err => {
+        scanStatus.textContent = "カメラを起動できませんでした: " + err;
+        scanStatus.className = "status err";
+      });
+    }).catch(err => {
+      scanStatus.textContent = "カメラ権限を確認してください: " + err;
+      scanStatus.className = "status err";
+    });
+  }
+
+  $("restartScan").addEventListener("click", () => {
+    lastLookedUp = "";
+    janInput.value = "";
+    resultArea.innerHTML = '<p class="status">JANコードを読み取ると自動で検索します</p>';
+    if (html5Qr) {
+      html5Qr.resume();
+      scanStatus.textContent = "再スキャン中…";
+      scanStatus.className = "status busy";
+    } else {
+      startScanner();
+    }
+  });
+
+  // Enterキーでの手入力にも対応
+  janInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && janInput.value.trim()) {
+      lookup(janInput.value.trim());
+    }
+  });
+
+  // ---------- lookup ----------
+  async function lookup(jan){
+    const url = getScriptUrl();
+    if (!url) {
+      resultArea.innerHTML = '<p class="not-found">先に「検索先の設定」からApps ScriptのURLを設定してください</p>';
+      return;
+    }
+    lastLookedUp = jan;
+    resultArea.innerHTML = '<p class="status busy">検索しています…</p>';
+
+    try {
+      const res = await fetch(url + "?jan=" + encodeURIComponent(jan));
+      const data = await res.json();
+
+      if (data.found) {
+        resultArea.innerHTML = `
+          <div class="result">
+            <div class="result-row">
+              <span class="result-label">読み取り種別</span>
+              <span class="result-value">${escapeHtml(data.matchType || "-")}</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">棚番1</span>
+              <span class="result-value">${escapeHtml(data.shelf1 || "-")}</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">棚番2</span>
+              <span class="result-value">${escapeHtml(data.shelf2 || "-")}</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">自社商品コード</span>
+              <span class="result-value">${escapeHtml(data.productCode || "-")}</span>
+            </div>
+          </div>`;
+        if (html5Qr) html5Qr.pause(true);
+      } else {
+        resultArea.innerHTML = `<p class="not-found">JANコード「${escapeHtml(jan)}」はマスタに見つかりませんでした</p>`;
+      }
+    } catch (err) {
+      resultArea.innerHTML = `<p class="not-found">検索に失敗しました: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    }[c]));
+  }
+
+  startScanner();
+})();
+</script>
+</body>
+</html>
