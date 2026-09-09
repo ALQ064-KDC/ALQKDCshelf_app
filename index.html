@@ -114,6 +114,16 @@
     <div id="resultArea"><p class="status">JANコードを読み取ると自動で検索します</p></div>
   </div>
 
+  <div class="panel">
+    <h2>メモを送信</h2>
+    <div class="field">
+      <label>入力内容(現在表示中のJANコードと一緒に送信されます)</label>
+      <input type="text" id="noteInput" placeholder="メモや報告内容を入力">
+    </div>
+    <button class="btn-secondary" id="sendNoteBtn">送信</button>
+    <div class="status" id="noteStatus"></div>
+  </div>
+
 </div>
 
 <dialog id="settingsDialog">
@@ -171,15 +181,16 @@
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = 1500;
+      osc.type = "square";
+      osc.frequency.value = 2400;
       gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.4, audioCtx.currentTime + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.005);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.09);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.start();
-      osc.stop(audioCtx.currentTime + 0.15);
+      osc.stop(audioCtx.currentTime + 0.09);
     } catch (err) {
       // 音が出せない環境では無視する
     }
@@ -297,6 +308,50 @@
       "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
     }[c]));
   }
+
+  // ---------- メモ送信 ----------
+  $("sendNoteBtn").addEventListener("click", async () => {
+    const noteStatus = $("noteStatus");
+    const url = getScriptUrl();
+    const text = $("noteInput").value.trim();
+
+    if (!url) {
+      noteStatus.textContent = "先に「検索先の設定」からApps ScriptのURLを設定してください";
+      noteStatus.className = "status err";
+      return;
+    }
+    if (!text) {
+      noteStatus.textContent = "入力内容が空です";
+      noteStatus.className = "status err";
+      return;
+    }
+
+    noteStatus.textContent = "送信しています…";
+    noteStatus.className = "status busy";
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // CORSプリフライトを避けるため
+        body: JSON.stringify({
+          jan: janInput.value.trim(),
+          text: text,
+          timestamp: new Date().toISOString()
+        })
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.ok && result.ok !== false) {
+        noteStatus.textContent = "送信しました";
+        noteStatus.className = "status";
+        $("noteInput").value = "";
+      } else {
+        throw new Error(result.error || ("HTTPステータス " + res.status));
+      }
+    } catch (err) {
+      noteStatus.textContent = "送信に失敗しました: " + err.message;
+      noteStatus.className = "status err";
+    }
+  });
 
   startScanner();
 })();
