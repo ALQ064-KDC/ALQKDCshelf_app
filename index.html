@@ -267,7 +267,7 @@
     janInput.value = "";
     resultArea.innerHTML = '<p class="status">JANコードを読み取ると自動で検索します</p>';
     if (html5Qr) {
-      html5Qr.resume();
+      try { html5Qr.resume(); } catch (resumeErr) { /* 既にスキャン中の場合は無視 */ }
       scanStatus.textContent = "再スキャン中…";
       scanStatus.className = "status busy";
     } else {
