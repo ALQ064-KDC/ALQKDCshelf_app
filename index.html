@@ -39,7 +39,8 @@
   }
   .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-soft); }
 
-  #reader { width: 100%; border-radius: 8px; overflow: hidden; background:#111; }
+  #reader { width: 100%; height: clamp(110px, 38vw, 190px); border-radius: 8px; overflow: hidden; background:#111; }
+  #reader video, #reader canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
 
   .field { margin-bottom: 10px; }
   .field label { display:block; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
@@ -137,6 +138,10 @@
       <label>または、URLが書かれた.txtファイルを選択</label>
       <input type="file" id="urlFileInput" accept=".txt,text/plain">
     </div>
+    <div class="field">
+      <label>アクセスキー(Apps Script側と同じ文字列を設定してください)</label>
+      <input type="text" id="accessKeyInput" placeholder="例: alqit-2026">
+    </div>
     <div class="status" id="settingsStatus"></div>
     <div class="dialog-actions">
       <button class="btn-ghost" id="closeSettings">閉じる</button>
@@ -159,18 +164,23 @@
 
   // ---------- settings ----------
   const SETTINGS_KEY = "lookupApp.scriptUrl";
+  const ACCESS_KEY_STORAGE = "lookupApp.accessKey";
   const getScriptUrl = () => localStorage.getItem(SETTINGS_KEY) || "";
   const setScriptUrl = (v) => localStorage.setItem(SETTINGS_KEY, v);
+  const getAccessKey = () => localStorage.getItem(ACCESS_KEY_STORAGE) || "";
+  const setAccessKey = (v) => localStorage.setItem(ACCESS_KEY_STORAGE, v);
 
   $("openSettings").addEventListener("click", () => {
     $("scriptUrlInput").value = getScriptUrl();
     $("urlFileInput").value = "";
+    $("accessKeyInput").value = getAccessKey();
     $("settingsStatus").textContent = "";
     $("settingsDialog").showModal();
   });
   $("closeSettings").addEventListener("click", () => $("settingsDialog").close());
   $("saveSettings").addEventListener("click", () => {
     setScriptUrl($("scriptUrlInput").value.trim());
+    setAccessKey($("accessKeyInput").value.trim());
     $("settingsDialog").close();
   });
 
@@ -233,31 +243,20 @@
     scanStatus.textContent = "カメラの起動を待っています…";
     scanStatus.className = "status busy";
     html5Qr = new Html5Qrcode("reader");
-    Html5Qrcode.getCameras().then(cameras => {
-      if (!cameras || !cameras.length) {
-        scanStatus.textContent = "カメラが見つかりません";
-        scanStatus.className = "status err";
-        return;
-      }
-      const back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
-      html5Qr.start(
-        back.id,
-        { fps: 10, qrbox: { width: 260, height: 140 } },
-        (decodedText) => {
-          if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
-          playBeep();
-          janInput.value = decodedText;
-          scanStatus.textContent = "読み取り成功: " + decodedText;
-          scanStatus.className = "status";
-          lookup(decodedText);
-        },
-        () => {}
-      ).catch(err => {
-        scanStatus.textContent = "カメラを起動できませんでした: " + err;
-        scanStatus.className = "status err";
-      });
-    }).catch(err => {
-      scanStatus.textContent = "カメラ権限を確認してください: " + err;
+    html5Qr.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 150 } },
+      (decodedText) => {
+        if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+        playBeep();
+        janInput.value = decodedText;
+        scanStatus.textContent = "読み取り成功: " + decodedText;
+        scanStatus.className = "status";
+        lookup(decodedText);
+      },
+      () => {}
+    ).catch(err => {
+      scanStatus.textContent = "カメラを起動できませんでした: " + err;
       scanStatus.className = "status err";
     });
   }
@@ -303,34 +302,40 @@
     resultArea.innerHTML = '<p class="status busy">検索しています…</p>';
 
     try {
-      const res = await fetch(url + "?jan=" + encodeURIComponent(jan));
+      const res = await fetch(url + "?jan=" + encodeURIComponent(jan) + "&key=" + encodeURIComponent(getAccessKey()));
       const data = await res.json();
 
       if (data.found) {
+        const shelf2Row = data.shelf2
+          ? `<div class="result-row">
+               <span class="result-label">棚番2</span>
+               <span class="result-value">${escapeHtml(data.shelf2)}</span>
+             </div>`
+          : "";
         resultArea.innerHTML = `
           <div class="result">
-            <div class="result-row">
-              <span class="result-label">読み取り種別</span>
-              <span class="result-value">${escapeHtml(data.matchType || "-")}</span>
-            </div>
             <div class="result-row">
               <span class="result-label">棚番1</span>
               <span class="result-value">${escapeHtml(data.shelf1 || "-")}</span>
             </div>
             <div class="result-row">
-              <span class="result-label">棚番2</span>
-              <span class="result-value">${escapeHtml(data.shelf2 || "-")}</span>
-            </div>
-            <div class="result-row">
-              <span class="result-label">自社商品コード</span>
+              <span class="result-label">KIT3商品コード</span>
               <span class="result-value">${escapeHtml(data.productCode || "-")}</span>
             </div>
+            <div class="result-row">
+              <span class="result-label">商品名</span>
+              <span class="result-value">${escapeHtml(data.productName || "-")}</span>
+            </div>
+            ${shelf2Row}
           </div>`;
         if (html5Qr) {
           try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
         }
       } else {
-        resultArea.innerHTML = `<p class="not-found">JANコード「${escapeHtml(jan)}」はマスタに見つかりませんでした</p>`;
+        const msg = data.error
+          ? data.error
+          : `JANコード「${jan}」はマスタに見つかりませんでした`;
+        resultArea.innerHTML = `<p class="not-found">${escapeHtml(msg)}</p>`;
       }
     } catch (err) {
       const detail = (err && (err.message || err.name)) ? (err.name + ": " + err.message) : String(err);
@@ -371,7 +376,8 @@
         body: JSON.stringify({
           jan: janInput.value.trim(),
           text: text,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          key: getAccessKey()
         })
       });
       const result = await res.json().catch(() => ({}));
