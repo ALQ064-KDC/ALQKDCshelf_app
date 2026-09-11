@@ -104,7 +104,7 @@
   <div class="panel">
     <h2>手入力で検索</h2>
     <div class="field">
-      <label>JANコード / ケースJANコード</label>
+      <label>JANコード / ケースJANコード / 商品コード</label>
       <input type="text" id="janInput" inputmode="numeric" placeholder="コードを入力">
     </div>
     <button class="btn-secondary" id="searchBtn">検索</button>
@@ -243,20 +243,44 @@
     scanStatus.textContent = "カメラの起動を待っています…";
     scanStatus.className = "status busy";
     html5Qr = new Html5Qrcode("reader");
-    html5Qr.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 250, height: 150 } },
-      (decodedText) => {
-        if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
-        playBeep();
-        janInput.value = decodedText;
-        scanStatus.textContent = "読み取り成功: " + decodedText;
-        scanStatus.className = "status";
-        lookup(decodedText);
-      },
-      () => {}
-    ).catch(err => {
-      scanStatus.textContent = "カメラを起動できませんでした: " + err;
+
+    const fullBoxConfig = {
+      fps: 10,
+      qrbox: function (viewfinderWidth, viewfinderHeight) {
+        return {
+          width: Math.floor(viewfinderWidth * 0.92),
+          height: Math.floor(viewfinderHeight * 0.92)
+        };
+      }
+    };
+
+    const onScanSuccess = (decodedText) => {
+      if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+      playBeep();
+      janInput.value = decodedText;
+      scanStatus.textContent = "読み取り成功: " + decodedText;
+      scanStatus.className = "status";
+      lookup(decodedText);
+    };
+
+    Html5Qrcode.getCameras().then(cameras => {
+      if (!cameras || !cameras.length) {
+        scanStatus.textContent = "カメラが見つかりません";
+        scanStatus.className = "status err";
+        return;
+      }
+      const back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+      html5Qr.start(
+        back.id,
+        fullBoxConfig,
+        onScanSuccess,
+        () => {}
+      ).catch(err => {
+        scanStatus.textContent = "カメラを起動できませんでした: " + err;
+        scanStatus.className = "status err";
+      });
+    }).catch(err => {
+      scanStatus.textContent = "カメラ権限を確認してください: " + err;
       scanStatus.className = "status err";
     });
   }
@@ -319,8 +343,8 @@
               <span class="result-value">${escapeHtml(data.shelf1 || "-")}</span>
             </div>
             <div class="result-row">
-              <span class="result-label">KIT3商品コード</span>
-              <span class="result-value">${escapeHtml(data.productCode || "-")}</span>
+              <span class="result-label">JANコード</span>
+              <span class="result-value">${escapeHtml(data.jan || "-")}</span>
             </div>
             <div class="result-row">
               <span class="result-label">商品名</span>
