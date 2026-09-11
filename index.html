@@ -251,6 +251,12 @@
           width: Math.floor(viewfinderWidth * 0.92),
           height: Math.floor(viewfinderHeight * 0.92)
         };
+      },
+      // JANコード(横長)は横方向の解像度が低いと認識しにくいため、高解像度を要求する
+      // (実際に得られる解像度は端末依存。負荷が高い場合は数値を下げてください)
+      videoConstraints: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
       }
     };
 
