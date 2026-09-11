@@ -326,7 +326,9 @@
               <span class="result-value">${escapeHtml(data.productCode || "-")}</span>
             </div>
           </div>`;
-        if (html5Qr) html5Qr.pause(true);
+        if (html5Qr) {
+          try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
+        }
       } else {
         resultArea.innerHTML = `<p class="not-found">JANコード「${escapeHtml(jan)}」はマスタに見つかりませんでした</p>`;
       }
