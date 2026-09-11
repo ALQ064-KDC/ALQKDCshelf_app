@@ -331,7 +331,8 @@
         resultArea.innerHTML = `<p class="not-found">JANコード「${escapeHtml(jan)}」はマスタに見つかりませんでした</p>`;
       }
     } catch (err) {
-      resultArea.innerHTML = `<p class="not-found">検索に失敗しました: ${escapeHtml(err.message)}</p>`;
+      const detail = (err && (err.message || err.name)) ? (err.name + ": " + err.message) : String(err);
+      resultArea.innerHTML = `<p class="not-found">検索に失敗しました: ${escapeHtml(detail)}</p>`;
     }
   }
 
