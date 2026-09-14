@@ -161,6 +161,7 @@
 
   let html5Qr = null;
   let lastLookedUp = "";
+  let lastProductCode = "";
 
   // ---------- settings ----------
   const SETTINGS_KEY = "lookupApp.scriptUrl";
@@ -336,6 +337,7 @@
       const data = await res.json();
 
       if (data.found) {
+        lastProductCode = data.productCode || "";
         const shelf2Row = data.shelf2
           ? `<div class="result-row">
                <span class="result-label">棚番2</span>
@@ -362,6 +364,7 @@
           try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
         }
       } else {
+        lastProductCode = "";
         const msg = data.error
           ? data.error
           : `JANコード「${jan}」はマスタに見つかりませんでした`;
@@ -405,6 +408,7 @@
         headers: { "Content-Type": "text/plain;charset=utf-8" }, // CORSプリフライトを避けるため
         body: JSON.stringify({
           jan: janInput.value.trim(),
+          productCode: lastProductCode,
           text: text,
           timestamp: new Date().toISOString(),
           key: getAccessKey()
