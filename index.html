@@ -39,16 +39,8 @@
   }
   .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-soft); }
 
-  #reader { width: 100%; height: clamp(110px, 38vw, 190px); border-radius: 8px; overflow: hidden; background:#111; }
-  #reader video, #reader canvas {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: cover;
-  }
-  #reader video {
-    transform: none !important;
-    -webkit-transform: none !important;
-  }
+  #reader { width: 100%; height: clamp(180px, 58vw, 280px); border-radius: 8px; overflow: hidden; background:#111; }
+  #reader video, #reader canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
 
   .field { margin-bottom: 10px; }
   .field label { display:block; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
@@ -248,48 +240,62 @@
   }
 
   // ---------- scanner ----------
-  function startScanner(){
+  async function startScanner(){
     scanStatus.textContent = "カメラの起動を待っています…";
     scanStatus.className = "status busy";
 
-    // 既存のスキャナがあれば停止してから作り直す
     if (html5Qr) {
+      try { await html5Qr.stop(); } catch (e) {}
       try { html5Qr.clear(); } catch (e) {}
     }
+
     html5Qr = new Html5Qrcode("reader");
 
-    // JAN(EAN-13)などの1次元バーコードに対象を絞る。
-    // iPhoneでは解析対象を絞ることで読み取り精度・速度を改善する。
+    // JAN/EANを中心に解析対象を限定して、iPhoneでの認識を軽くする
     const scannerConfig = {
-      fps: 10,
-      aspectRatio: 1.7777778,
-      disableFlip: false,
+      fps: 12,
+      disableFlip: true,
       formatsToSupport: [
         Html5QrcodeSupportedFormats.EAN_13,
         Html5QrcodeSupportedFormats.EAN_8,
         Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39
+        Html5QrcodeSupportedFormats.UPC_E
       ],
-      // JANは横長なので、横幅を広く・高さを浅くする
-      qrbox: function (viewfinderWidth, viewfinderHeight) {
-        const width = Math.floor(viewfinderWidth * 0.94);
+      qrbox: function(viewfinderWidth, viewfinderHeight) {
+        const width = Math.floor(viewfinderWidth * 0.96);
         const height = Math.max(
-          80,
-          Math.min(Math.floor(viewfinderHeight * 0.38), 150)
+          90,
+          Math.min(Math.floor(viewfinderHeight * 0.32), 160)
         );
         return { width, height };
       }
     };
 
-    const onScanSuccess = (decodedText) => {
-      const code = String(decodedText || "").trim();
+    let lastCandidate = "";
+    let candidateCount = 0;
 
-      // JANは数字8～13桁を基本として誤検出を除外
-      if (!/^[0-9]{8,13}$/.test(code)) return;
+    const onScanSuccess = (decodedText) => {
+      // JAN/EANとして数字だけを取り出す
+      const code = String(decodedText || "").replace(/\D/g, "");
+      if (!/^(?:\d{8}|\d{12}|\d{13})$/.test(code)) return;
+
+      // iPhoneでは同じコードを2回認識してから確定
+      if (code === lastCandidate) {
+        candidateCount++;
+      } else {
+        lastCandidate = code;
+        candidateCount = 1;
+      }
+
+      if (candidateCount < 2) {
+        scanStatus.textContent = "認識中… JANコードを枠内に合わせてください";
+        scanStatus.className = "status busy";
+        return;
+      }
+
       if (code === lastLookedUp) return;
 
+      candidateCount = 0;
       playBeep();
       janInput.value = code;
       scanStatus.textContent = "読み取り成功: " + code;
@@ -299,44 +305,52 @@
 
     const onScanFailure = () => {};
 
-    // iPhone / iPad SafariではdeviceIdを選ぶより
-    // facingMode: environment の方が背面カメラを安定して選べる。
+    // iPhone/iPadではdeviceId指定より背面カメラ指定を優先
     const isIOS =
       /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-    const cameraConfig = isIOS
-      ? { facingMode: { exact: "environment" } }
-      : { facingMode: "environment" };
+    const cameraSettings = isIOS
+      ? {
+          facingMode: "environment",
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      : {
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        };
 
-    html5Qr.start(
-      cameraConfig,
-      scannerConfig,
-      onScanSuccess,
-      onScanFailure
-    ).then(() => {
-      scanStatus.textContent = "JANコードをカメラに映してください";
+    try {
+      await html5Qr.start(
+        cameraSettings,
+        scannerConfig,
+        onScanSuccess,
+        onScanFailure
+      );
+
+      scanStatus.textContent =
+        "JANコードを枠内に大きく映してください（少しずつ距離を調整）";
       scanStatus.className = "status";
-    }).catch(err => {
-      // iOSでexact指定が使えない場合のフォールバック
-      if (isIOS) {
-        html5Qr.start(
+    } catch (err) {
+      // 一部ブラウザ向けに条件を減らして再試行
+      try {
+        await html5Qr.start(
           { facingMode: "environment" },
           scannerConfig,
           onScanSuccess,
           onScanFailure
-        ).then(() => {
-          scanStatus.textContent = "JANコードをカメラに映してください";
-          scanStatus.className = "status";
-        }).catch(err2 => {
-          scanStatus.textContent = "カメラを起動できませんでした: " + err2;
-          scanStatus.className = "status err";
-        });
-      } else {
-        scanStatus.textContent = "カメラを起動できませんでした: " + err;
+        );
+
+        scanStatus.textContent = "JANコードを枠内に大きく映してください";
+        scanStatus.className = "status";
+      } catch (err2) {
+        scanStatus.textContent =
+          "カメラを起動できませんでした。カメラの許可を確認してください。";
         scanStatus.className = "status err";
       }
-    });
+    }
   }
 
   $("restartScan").addEventListener("click", () => {
