@@ -272,17 +272,11 @@
         scanStatus.className = "status err";
         return;
       }
-      // 背面カメラを優先的に探し、見つからなければ前面カメラを除外した中から選ぶ
-      const back = cameras.find(c => /back|rear|environment|背面/i.test(c.label))
-        || cameras.find(c => !/front|user|前面|インカメラ/i.test(c.label))
-        || cameras[cameras.length - 1];
+      // 背面カメラを優先的に選ぶ(見つからなければ最後のカメラ)
+      const back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
 
       html5Qr.start(
-        {
-          deviceId: { exact: back.id },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
+        back.id,
         boxConfig,
         onScanSuccess,
         onScanFailure
