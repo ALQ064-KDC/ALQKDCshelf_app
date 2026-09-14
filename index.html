@@ -40,7 +40,15 @@
   .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-soft); }
 
   #reader { width: 100%; height: clamp(110px, 38vw, 190px); border-radius: 8px; overflow: hidden; background:#111; }
-  #reader video, #reader canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #reader video, #reader canvas {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+  }
+  #reader video {
+    transform: none !important;
+    -webkit-transform: none !important;
+  }
 
   .field { margin-bottom: 10px; }
   .field label { display:block; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
@@ -243,50 +251,91 @@
   function startScanner(){
     scanStatus.textContent = "カメラの起動を待っています…";
     scanStatus.className = "status busy";
+
+    // 既存のスキャナがあれば停止してから作り直す
+    if (html5Qr) {
+      try { html5Qr.clear(); } catch (e) {}
+    }
     html5Qr = new Html5Qrcode("reader");
 
-    const boxConfig = {
-      fps: 15,
+    // JAN(EAN-13)などの1次元バーコードに対象を絞る。
+    // iPhoneでは解析対象を絞ることで読み取り精度・速度を改善する。
+    const scannerConfig = {
+      fps: 10,
+      aspectRatio: 1.7777778,
+      disableFlip: false,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39
+      ],
+      // JANは横長なので、横幅を広く・高さを浅くする
       qrbox: function (viewfinderWidth, viewfinderHeight) {
-        return {
-          width: Math.floor(viewfinderWidth * 0.92),
-          height: Math.floor(viewfinderHeight * 0.92)
-        };
+        const width = Math.floor(viewfinderWidth * 0.94);
+        const height = Math.max(
+          80,
+          Math.min(Math.floor(viewfinderHeight * 0.38), 150)
+        );
+        return { width, height };
       }
     };
 
     const onScanSuccess = (decodedText) => {
-      if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+      const code = String(decodedText || "").trim();
+
+      // JANは数字8～13桁を基本として誤検出を除外
+      if (!/^[0-9]{8,13}$/.test(code)) return;
+      if (code === lastLookedUp) return;
+
       playBeep();
-      janInput.value = decodedText;
-      scanStatus.textContent = "読み取り成功: " + decodedText;
+      janInput.value = code;
+      scanStatus.textContent = "読み取り成功: " + code;
       scanStatus.className = "status";
-      lookup(decodedText);
+      lookup(code);
     };
 
     const onScanFailure = () => {};
 
-    Html5Qrcode.getCameras().then(cameras => {
-      if (!cameras || !cameras.length) {
-        scanStatus.textContent = "カメラが見つかりません";
-        scanStatus.className = "status err";
-        return;
-      }
-      // 背面カメラを優先的に選ぶ(見つからなければ最後のカメラ)
-      const back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+    // iPhone / iPad SafariではdeviceIdを選ぶより
+    // facingMode: environment の方が背面カメラを安定して選べる。
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-      html5Qr.start(
-        back.id,
-        boxConfig,
-        onScanSuccess,
-        onScanFailure
-      ).catch(err => {
+    const cameraConfig = isIOS
+      ? { facingMode: { exact: "environment" } }
+      : { facingMode: "environment" };
+
+    html5Qr.start(
+      cameraConfig,
+      scannerConfig,
+      onScanSuccess,
+      onScanFailure
+    ).then(() => {
+      scanStatus.textContent = "JANコードをカメラに映してください";
+      scanStatus.className = "status";
+    }).catch(err => {
+      // iOSでexact指定が使えない場合のフォールバック
+      if (isIOS) {
+        html5Qr.start(
+          { facingMode: "environment" },
+          scannerConfig,
+          onScanSuccess,
+          onScanFailure
+        ).then(() => {
+          scanStatus.textContent = "JANコードをカメラに映してください";
+          scanStatus.className = "status";
+        }).catch(err2 => {
+          scanStatus.textContent = "カメラを起動できませんでした: " + err2;
+          scanStatus.className = "status err";
+        });
+      } else {
         scanStatus.textContent = "カメラを起動できませんでした: " + err;
         scanStatus.className = "status err";
-      });
-    }).catch(err => {
-      scanStatus.textContent = "カメラ権限を確認してください: " + err;
-      scanStatus.className = "status err";
+      }
     });
   }
 
