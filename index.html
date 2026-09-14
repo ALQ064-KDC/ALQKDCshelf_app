@@ -266,43 +266,33 @@
 
     const onScanFailure = () => {};
 
-    // まずOSに直接「背面カメラ・高解像度」を要求する(機種名に頼らないので確実)
-    // JANコード(横長)は横方向の解像度が低いと認識しにくいため、高解像度を要求する
-    const environmentConstraints = {
-      facingMode: { ideal: "environment" },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 }
-    };
+    Html5Qrcode.getCameras().then(cameras => {
+      if (!cameras || !cameras.length) {
+        scanStatus.textContent = "カメラが見つかりません";
+        scanStatus.className = "status err";
+        return;
+      }
+      // 背面カメラを優先的に探し、見つからなければ前面カメラを除外した中から選ぶ
+      const back = cameras.find(c => /back|rear|environment|背面/i.test(c.label))
+        || cameras.find(c => !/front|user|前面|インカメラ/i.test(c.label))
+        || cameras[cameras.length - 1];
 
-    html5Qr.start(environmentConstraints, boxConfig, onScanSuccess, onScanFailure).catch(() => {
-      // 直前のインスタンスをきちんと片付けてから、新しいインスタンスでフォールバックする
-      // (同じインスタンスに連続でstart()すると「already under transition」エラーになるため)
-      html5Qr.clear().catch(() => {}).finally(() => {
-        html5Qr = new Html5Qrcode("reader");
-
-        Html5Qrcode.getCameras().then(cameras => {
-          if (!cameras || !cameras.length) {
-            scanStatus.textContent = "カメラが見つかりません";
-            scanStatus.className = "status err";
-            return;
-          }
-          const back = cameras.find(c => /back|rear|environment|背面/i.test(c.label))
-            || cameras.find(c => !/front|user|前面|インカメラ/i.test(c.label))
-            || cameras[cameras.length - 1];
-          html5Qr.start(
-            back.id,
-            boxConfig,
-            onScanSuccess,
-            onScanFailure
-          ).catch(err => {
-            scanStatus.textContent = "カメラを起動できませんでした: " + err;
-            scanStatus.className = "status err";
-          });
-        }).catch(err => {
-          scanStatus.textContent = "カメラ権限を確認してください: " + err;
-          scanStatus.className = "status err";
-        });
+      html5Qr.start(
+        {
+          deviceId: { exact: back.id },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        boxConfig,
+        onScanSuccess,
+        onScanFailure
+      ).catch(err => {
+        scanStatus.textContent = "カメラを起動できませんでした: " + err;
+        scanStatus.className = "status err";
       });
+    }).catch(err => {
+      scanStatus.textContent = "カメラ権限を確認してください: " + err;
+      scanStatus.className = "status err";
     });
   }
 
