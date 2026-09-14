@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>棚番・商品コード検索</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{
     --bg: #F5F3EE;
@@ -39,8 +40,45 @@
   }
   .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-soft); }
 
-  #reader { width: 100%; height: clamp(180px, 58vw, 280px); border-radius: 8px; overflow: hidden; background:#111; }
-  #reader video, #reader canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #reader {
+    position:relative;
+    width:100%;
+    height:clamp(220px, 62vw, 340px);
+    border-radius:8px;
+    overflow:hidden;
+    background:#111;
+  }
+  #reader video, #reader canvas {
+    width:100% !important;
+    height:100% !important;
+    object-fit:cover;
+  }
+  #reader .ocr-guide {
+    position:absolute;
+    z-index:10;
+    left:3%;
+    right:3%;
+    top:50%;
+    height:30%;
+    transform:translateY(-50%);
+    border:3px solid rgba(255,255,255,.92);
+    border-radius:8px;
+    box-shadow:0 0 0 9999px rgba(0,0,0,.24);
+    pointer-events:none;
+  }
+  #reader .ocr-guide-label {
+    position:absolute;
+    z-index:11;
+    left:0; right:0;
+    top:calc(50% + 17%);
+    transform:translateY(-50%);
+    text-align:center;
+    color:#fff;
+    font-size:12px;
+    font-weight:600;
+    text-shadow:0 1px 3px #000;
+    pointer-events:none;
+  }
 
   .field { margin-bottom: 10px; }
   .field label { display:block; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
@@ -96,9 +134,14 @@
 
   <div class="panel">
     <h2>カメラでJANコードを読み取る</h2>
-    <div id="reader"></div>
+    <div id="reader">
+      <div class="ocr-guide"></div>
+      <div class="ocr-guide-label">JANコードを枠いっぱいに合わせてください</div>
+    </div>
+    <canvas id="ocrCanvas" style="display:none;"></canvas>
     <button class="btn-secondary" id="restartScan" style="margin-top:10px;">再スキャン</button>
     <div class="status" id="scanStatus">カメラの起動を待っています…</div>
+    <div class="status" id="ocrText">JANコードの数字を認識します</div>
   </div>
 
   <div class="panel">
@@ -240,130 +283,196 @@
   }
 
   // ---------- scanner ----------
-  async function startScanner(){
-    scanStatus.textContent = "カメラの起動を待っています…";
-    scanStatus.className = "status busy";
+  let html5Qr = null;
+  let ocrWorker = null;
+  let ocrReady = false;
+  let ocrBusy = false;
+  let ocrTimer = null;
 
-    if (html5Qr) {
-      try { await html5Qr.stop(); } catch (e) {}
-      try { html5Qr.clear(); } catch (e) {}
+  function isValidJAN(code){
+    if (!/^\d{13}$/.test(code)) return false;
+    let sum = 0;
+    for(let i=0;i<12;i++){
+      const n = Number(code[i]);
+      sum += (i % 2 === 0) ? n : n * 3;
     }
+    return ((10 - (sum % 10)) % 10) === Number(code[12]);
+  }
 
-    html5Qr = new Html5Qrcode("reader");
+  function normalizeOCR(s){
+    return String(s || "")
+      .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0)-0xfee0))
+      .replace(/[OoQ]/g,"0")
+      .replace(/[Il|]/g,"1")
+      .replace(/S/g,"5")
+      .replace(/B/g,"8")
+      .replace(/[^0-9]/g,"");
+  }
 
-    // JAN/EANを中心に解析対象を限定して、iPhoneでの認識を軽くする
-    const scannerConfig = {
-      fps: 12,
-      disableFlip: true,
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E
-      ],
-      qrbox: function(viewfinderWidth, viewfinderHeight) {
-        const width = Math.floor(viewfinderWidth * 0.96);
-        const height = Math.max(
-          90,
-          Math.min(Math.floor(viewfinderHeight * 0.32), 160)
-        );
-        return { width, height };
-      }
-    };
+  function findJAN(s){
+    const d = normalizeOCR(s);
+    for(let i=0;i<=d.length-13;i++){
+      const c=d.slice(i,i+13);
+      if(isValidJAN(c)) return c;
+    }
+    return "";
+  }
 
-    let lastCandidate = "";
-    let candidateCount = 0;
-
-    const onScanSuccess = (decodedText) => {
-      // JAN/EANとして数字だけを取り出す
-      const code = String(decodedText || "").replace(/\D/g, "");
-      if (!/^(?:\d{8}|\d{12}|\d{13})$/.test(code)) return;
-
-      // iPhoneでは同じコードを2回認識してから確定
-      if (code === lastCandidate) {
-        candidateCount++;
-      } else {
-        lastCandidate = code;
-        candidateCount = 1;
-      }
-
-      if (candidateCount < 2) {
-        scanStatus.textContent = "認識中… JANコードを枠内に合わせてください";
-        scanStatus.className = "status busy";
-        return;
-      }
-
-      if (code === lastLookedUp) return;
-
-      candidateCount = 0;
-      playBeep();
-      janInput.value = code;
-      scanStatus.textContent = "読み取り成功: " + code;
-      scanStatus.className = "status";
-      lookup(code);
-    };
-
-    const onScanFailure = () => {};
-
-    // iPhone/iPadではdeviceId指定より背面カメラ指定を優先
-    const isIOS =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-
-    const cameraSettings = isIOS
-      ? {
-          facingMode: "environment",
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
-      : {
-          facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        };
-
-    try {
-      await html5Qr.start(
-        cameraSettings,
-        scannerConfig,
-        onScanSuccess,
-        onScanFailure
-      );
-
-      scanStatus.textContent =
-        "JANコードを枠内に大きく映してください（少しずつ距離を調整）";
-      scanStatus.className = "status";
-    } catch (err) {
-      // 一部ブラウザ向けに条件を減らして再試行
-      try {
-        await html5Qr.start(
-          { facingMode: "environment" },
-          scannerConfig,
-          onScanSuccess,
-          onScanFailure
-        );
-
-        scanStatus.textContent = "JANコードを枠内に大きく映してください";
-        scanStatus.className = "status";
-      } catch (err2) {
-        scanStatus.textContent =
-          "カメラを起動できませんでした。カメラの許可を確認してください。";
-        scanStatus.className = "status err";
-      }
+  async function initOCR(){
+    if(ocrReady) return true;
+    try{
+      $("ocrText").textContent = "文字認識エンジンを準備しています…";
+      ocrWorker = await Tesseract.createWorker("eng");
+      await ocrWorker.setParameters({
+        tessedit_char_whitelist:"0123456789",
+        tessedit_pageseg_mode:"7"
+      });
+      ocrReady = true;
+      $("ocrText").textContent = "JANコードの数字を認識します";
+      return true;
+    }catch(e){
+      $("ocrText").textContent = "文字認識エンジンを準備できませんでした";
+      return false;
     }
   }
 
-  $("restartScan").addEventListener("click", () => {
+  async function recognizeJANFromVideo(){
+    if(ocrBusy || !html5Qr) return;
+
+    const video = document.querySelector("#reader video");
+    if(!video || !video.videoWidth || !video.videoHeight) return;
+
+    ocrBusy = true;
+    try{
+      const canvas = $("ocrCanvas");
+      const sw = video.videoWidth;
+      const sh = video.videoHeight;
+
+      // 画面中央の横長ガイド付近をOCR。
+      const sx = Math.floor(sw * 0.02);
+      const sy = Math.floor(sh * 0.34);
+      const sWidth = Math.floor(sw * 0.96);
+      const sHeight = Math.floor(sh * 0.32);
+
+      canvas.width = 1600;
+      canvas.height = 520;
+      const ctx = canvas.getContext("2d", {willReadFrequently:true});
+      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+
+      // コントラストを上げる
+      const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+      for(let i=0;i<img.data.length;i+=4){
+        const g = Math.round(img.data[i]*.299 + img.data[i+1]*.587 + img.data[i+2]*.114);
+        const v = g > 145 ? 255 : 0;
+        img.data[i]=v; img.data[i+1]=v; img.data[i+2]=v;
+      }
+      ctx.putImageData(img,0,0);
+
+      const r = await ocrWorker.recognize(canvas);
+      const raw = r?.data?.text || "";
+      const jan = findJAN(raw);
+
+      if(raw.trim()) $("ocrText").textContent = "文字認識: " + normalizeOCR(raw);
+
+      if(jan && jan !== lastLookedUp){
+        janInput.value = jan;
+        $("ocrText").textContent = "JAN認識成功: " + jan;
+        playBeep();
+
+        if(ocrTimer){ clearInterval(ocrTimer); ocrTimer=null; }
+        try{ await html5Qr.stop(); }catch(e){}
+        lookup(jan);
+      }
+    }catch(e){
+      // 次のOCRタイミングで再試行
+    }finally{
+      ocrBusy=false;
+    }
+  }
+
+  async function startScanner(){
+    if(ocrTimer){ clearInterval(ocrTimer); ocrTimer=null; }
+    if(html5Qr){
+      try{ await html5Qr.stop(); }catch(e){}
+    }
+
+    lastLookedUp = "";
+    $("ocrText").textContent = "JANコードの数字を認識します";
+    scanStatus.textContent = "カメラを起動しています…";
+    scanStatus.className = "status busy";
+
+    html5Qr = new Html5Qrcode("reader", {
+      verbose:false,
+      formatsToSupport:[
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8
+      ]
+    });
+
+    const config = {
+      fps:10,
+      qrbox:function(viewWidth, viewHeight){
+        return {
+          width: Math.floor(viewWidth * 0.94),
+          height: Math.min(150, Math.floor(viewHeight * 0.30))
+        };
+      },
+      aspectRatio: 1.7777778,
+      disableFlip:true
+    };
+
+    const onSuccess = async (decodedText) => {
+      const jan = String(decodedText || "").replace(/\D/g,"");
+      if(jan && (isValidJAN(jan) || jan.length === 8)){
+        janInput.value = jan;
+        if(ocrTimer){ clearInterval(ocrTimer); ocrTimer=null; }
+        playBeep();
+        try{ await html5Qr.stop(); }catch(e){}
+        lookup(jan);
+      }
+    };
+
+    const onError = () => {};
+
+    try{
+      // 以前の実装と同じくhtml5-qrcodeでカメラを取得。
+      // LINE内ブラウザ/iPhoneでもgetUserMedia直呼びより互換性が高い。
+      await html5Qr.start(
+        {facingMode:{exact:"environment"}},
+        config,
+        onSuccess,
+        onError
+      );
+    }catch(e1){
+      try{
+        await html5Qr.start(
+          {facingMode:"environment"},
+          config,
+          onSuccess,
+          onError
+        );
+      }catch(e2){
+        scanStatus.textContent = "カメラを起動できません。LINE内ブラウザの場合は「ブラウザで開く」でお試しください。";
+        scanStatus.className = "status err";
+        return;
+      }
+    }
+
+    scanStatus.textContent = "JANコードを枠いっぱいに合わせてください";
+    scanStatus.className = "status";
+
+    // カメラ映像が実際に表示されてからOCRを開始。
+    const ready = await initOCR();
+    if(ready){
+      ocrTimer = setInterval(recognizeJANFromVideo, 1200);
+    }
+  }
+
+  $("restartScan").addEventListener("click", async () => {
     lastLookedUp = "";
     janInput.value = "";
     resultArea.innerHTML = '<p class="status">JANコードを読み取ると自動で検索します</p>';
-    if (html5Qr) {
-      try { html5Qr.resume(); } catch (resumeErr) { /* 既にスキャン中の場合は無視 */ }
-      scanStatus.textContent = "再スキャン中…";
-      scanStatus.className = "status busy";
-    } else {
-      startScanner();
-    }
+    await startScanner();
   });
 
   // 手入力: Enterキー、検索ボタンどちらでも検索できるようにする
