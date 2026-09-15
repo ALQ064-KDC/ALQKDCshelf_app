@@ -102,6 +102,17 @@
   </div>
 
   <div class="panel">
+    <h2>画像から読み取る</h2>
+    <p style="font-size:12.5px; color:var(--ink-soft); margin:0 0 10px;">
+      ライブカメラでうまく読み取れない場合、標準のカメラアプリで撮った写真を選ぶと読み取れることがあります(特にiPhoneの場合)。
+    </p>
+    <input type="file" id="imageFileInput" accept="image/*" style="display:none;">
+    <button class="btn-secondary" id="imageFileBtn">画像を選択して読み取る</button>
+    <div id="fileScanReader" style="display:none;"></div>
+    <div class="status" id="fileScanStatus"></div>
+  </div>
+
+  <div class="panel">
     <h2>手入力で検索</h2>
     <div class="field">
       <label>JANコード / ケースJANコード / 商品コード</label>
@@ -289,6 +300,39 @@
       scanStatus.className = "status err";
     });
   }
+
+  // ---------- 画像から読み取る(ライブカメラの補助) ----------
+  const fileScanStatus = $("fileScanStatus");
+
+  $("imageFileBtn").addEventListener("click", () => {
+    $("imageFileInput").click();
+  });
+
+  $("imageFileInput").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    fileScanStatus.textContent = "画像を解析しています…";
+    fileScanStatus.className = "status busy";
+
+    // ライブカメラと同じdiv(#reader)を使うと競合するため、非表示の別要素で読み取る
+    const fileScanner = new Html5Qrcode("fileScanReader");
+    try {
+      const decodedText = await fileScanner.scanFile(file, false);
+      playBeep();
+      janInput.value = decodedText;
+      fileScanStatus.textContent = "読み取り成功: " + decodedText;
+      fileScanStatus.className = "status";
+      lastLookedUp = ""; // 画像からの読み取りは同じ値でも検索できるようにする
+      lookup(decodedText);
+    } catch (err) {
+      fileScanStatus.textContent = "画像からバーコードを検出できませんでした。別の写真で試してください。";
+      fileScanStatus.className = "status err";
+    } finally {
+      try { await fileScanner.clear(); } catch (clearErr) { /* 無視 */ }
+      $("imageFileInput").value = ""; // 同じファイルを選び直せるようにする
+    }
+  });
 
   $("restartScan").addEventListener("click", () => {
     lastLookedUp = "";
