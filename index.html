@@ -104,8 +104,7 @@
   <div class="panel">
     <h2>手入力で検索</h2>
     <div class="field">
-      <label>JANコード / ケースJANコード / 商品コード</label>
-      <input type="text" id="janInput" inputmode="numeric" placeholder="コードを入力">
+      <input type="text" id="janInput" inputmode="numeric" placeholder="JANコード / ケースJANコード / 商品コード">
     </div>
     <button class="btn-secondary" id="searchBtn">検索</button>
   </div>
@@ -265,6 +264,9 @@
 
     const onScanSuccess = (decodedText) => {
       if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+      if (html5Qr) {
+        try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
+      }
       playBeep();
       janInput.value = decodedText;
       scanStatus.textContent = "読み取り成功: " + decodedText;
