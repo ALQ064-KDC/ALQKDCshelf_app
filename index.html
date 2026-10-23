@@ -214,7 +214,6 @@
 
   // ---------- 読み取り完了音 ----------
   let audioCtx = null;
-  // iOSはユーザー操作なしで音を鳴らせないため、画面タップ時に一度だけ準備しておく
   document.addEventListener("touchend", primeAudio, { once: true });
   document.addEventListener("click", primeAudio, { once: true });
   function primeAudio(){
@@ -236,9 +235,7 @@
       gain.connect(audioCtx.destination);
       osc.start();
       osc.stop(audioCtx.currentTime + 0.09);
-    } catch (err) {
-      // 音が出せない環境では無視する
-    }
+    } catch (err) {}
   }
 
   // ---------- scanner ----------
@@ -249,13 +246,27 @@
 
     const boxConfig = {
       fps: 10,
-      qrbox: { width: 260, height: 140 }
+      qrbox: { width: 260, height: 140 },
+      // ① JANコード(EAN)などの必要な形式のみに絞ることで処理を軽量化
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128
+      ],
+      // ② iPhoneなどの高解像度による処理落ちを防ぐため、解像度を適切に制限する
+      videoConstraints: {
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
     };
 
     const onScanSuccess = (decodedText) => {
-      if (decodedText === lastLookedUp) return; // avoid duplicate lookups on same code
+      if (decodedText === lastLookedUp) return;
       if (html5Qr) {
-        try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
+        try { html5Qr.pause(true); } catch (pauseErr) {}
       }
       playBeep();
       janInput.value = decodedText;
@@ -272,7 +283,6 @@
         scanStatus.className = "status err";
         return;
       }
-      // 背面カメラを優先的に選ぶ(見つからなければ最後のカメラ)
       const back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
 
       html5Qr.start(
@@ -295,7 +305,7 @@
     janInput.value = "";
     resultArea.innerHTML = '<p class="status">JANコードを読み取ると自動で検索します</p>';
     if (html5Qr) {
-      try { html5Qr.resume(); } catch (resumeErr) { /* 既にスキャン中の場合は無視 */ }
+      try { html5Qr.resume(); } catch (resumeErr) {}
       scanStatus.textContent = "再スキャン中…";
       scanStatus.className = "status busy";
     } else {
@@ -303,10 +313,9 @@
     }
   });
 
-  // 手入力: Enterキー、検索ボタンどちらでも検索できるようにする
   janInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && janInput.value.trim()) {
-      lastLookedUp = ""; // 手入力は同じ値でも再検索できるようにする
+      lastLookedUp = "";
       lookup(janInput.value.trim());
     }
   });
@@ -321,7 +330,6 @@
   });
 
   // ---------- lookup ----------
-  // 検索結果1件分の表示(棚番1 → JANコード → 商品名 → 棚番2(ある時のみ))
   function buildResultRows(it){
     const shelf2Row = it.shelf2
       ? `<div class="result-row">
@@ -359,7 +367,6 @@
       const data = await res.json();
 
       if (data.found && data.multiple) {
-        // 下6桁検索などで候補が複数ある場合は一覧表示し、タップで選択する
         lastProductCode = "";
         const cards = data.items.map((it, idx) => `
           <div class="candidate" data-idx="${idx}">
@@ -378,13 +385,13 @@
           });
         });
         if (html5Qr) {
-          try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
+          try { html5Qr.pause(true); } catch (pauseErr) {}
         }
       } else if (data.found) {
         lastProductCode = data.productCode || "";
         resultArea.innerHTML = `<div class="result">${buildResultRows(data)}</div>`;
         if (html5Qr) {
-          try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
+          try { html5Qr.pause(true); } catch (pauseErr) {}
         }
       } else {
         lastProductCode = "";
@@ -428,7 +435,7 @@
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" }, // CORSプリフライトを避けるため
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({
           jan: janInput.value.trim(),
           productCode: lastProductCode,
