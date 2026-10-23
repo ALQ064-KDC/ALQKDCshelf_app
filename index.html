@@ -70,6 +70,9 @@
   .result-row:last-child { border-bottom: none; }
   .result-label { font-size: 12.5px; color: var(--ink-soft); }
   .result-value { font-size: 20px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .candidate { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; margin-top: 10px; cursor: pointer; }
+  .candidate.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .candidate .result-row:last-child { border-bottom: none; }
   .not-found { color: var(--warn); font-size: 14px; padding: 10px 4px; }
 
   .gear-row { display:flex; justify-content: flex-end; margin-bottom: 8px; }
@@ -104,7 +107,7 @@
   <div class="panel">
     <h2>手入力で検索</h2>
     <div class="field">
-      <input type="text" id="janInput" inputmode="numeric" placeholder="JANコード / ケースJANコード / 商品コード">
+      <input type="text" id="janInput" inputmode="numeric" placeholder="JANコード / ケースJANコード(下4桁可) / 商品コード">
     </div>
     <button class="btn-secondary" id="searchBtn">検索</button>
   </div>
@@ -318,6 +321,30 @@
   });
 
   // ---------- lookup ----------
+  // 検索結果1件分の表示(棚番1 → JANコード → 商品名 → 棚番2(ある時のみ))
+  function buildResultRows(it){
+    const shelf2Row = it.shelf2
+      ? `<div class="result-row">
+           <span class="result-label">棚番2</span>
+           <span class="result-value">${escapeHtml(it.shelf2)}</span>
+         </div>`
+      : "";
+    return `
+      <div class="result-row">
+        <span class="result-label">棚番1</span>
+        <span class="result-value">${escapeHtml(it.shelf1 || "-")}</span>
+      </div>
+      <div class="result-row">
+        <span class="result-label">JANコード</span>
+        <span class="result-value">${escapeHtml(it.jan || "-")}</span>
+      </div>
+      <div class="result-row">
+        <span class="result-label">商品名</span>
+        <span class="result-value">${escapeHtml(it.productName || "-")}</span>
+      </div>
+      ${shelf2Row}`;
+  }
+
   async function lookup(jan){
     const url = getScriptUrl();
     if (!url) {
@@ -331,30 +358,31 @@
       const res = await fetch(url + "?jan=" + encodeURIComponent(jan) + "&key=" + encodeURIComponent(getAccessKey()));
       const data = await res.json();
 
-      if (data.found) {
-        lastProductCode = data.productCode || "";
-        const shelf2Row = data.shelf2
-          ? `<div class="result-row">
-               <span class="result-label">棚番2</span>
-               <span class="result-value">${escapeHtml(data.shelf2)}</span>
-             </div>`
-          : "";
+      if (data.found && data.multiple) {
+        // 下4桁検索などで候補が複数ある場合は一覧表示し、タップで選択する
+        lastProductCode = "";
+        const cards = data.items.map((it, idx) => `
+          <div class="candidate" data-idx="${idx}">
+            ${buildResultRows(it)}
+          </div>`).join("");
         resultArea.innerHTML = `
-          <div class="result">
-            <div class="result-row">
-              <span class="result-label">棚番1</span>
-              <span class="result-value">${escapeHtml(data.shelf1 || "-")}</span>
-            </div>
-            <div class="result-row">
-              <span class="result-label">JANコード</span>
-              <span class="result-value">${escapeHtml(data.jan || "-")}</span>
-            </div>
-            <div class="result-row">
-              <span class="result-label">商品名</span>
-              <span class="result-value">${escapeHtml(data.productName || "-")}</span>
-            </div>
-            ${shelf2Row}
-          </div>`;
+          <p class="status">「${escapeHtml(jan)}」に該当する商品が${data.items.length}件あります。対象の商品をタップしてください</p>
+          ${cards}`;
+        resultArea.querySelectorAll(".candidate").forEach(el => {
+          el.addEventListener("click", () => {
+            const it = data.items[Number(el.dataset.idx)];
+            resultArea.querySelectorAll(".candidate").forEach(c => c.classList.remove("selected"));
+            el.classList.add("selected");
+            janInput.value = it.jan || "";
+            lastProductCode = it.productCode || "";
+          });
+        });
+        if (html5Qr) {
+          try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
+        }
+      } else if (data.found) {
+        lastProductCode = data.productCode || "";
+        resultArea.innerHTML = `<div class="result">${buildResultRows(data)}</div>`;
         if (html5Qr) {
           try { html5Qr.pause(true); } catch (pauseErr) { /* 既に停止中の場合は無視 */ }
         }
