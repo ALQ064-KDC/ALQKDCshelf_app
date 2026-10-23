@@ -107,7 +107,7 @@
   <div class="panel">
     <h2>手入力で検索</h2>
     <div class="field">
-      <input type="text" id="janInput" inputmode="numeric" placeholder="JANコード / ケースJANコード(下4桁可) / 商品コード">
+      <input type="text" id="janInput" inputmode="numeric" placeholder="JANコード / ケースJANコード(下6桁可) / 商品コード">
     </div>
     <button class="btn-secondary" id="searchBtn">検索</button>
   </div>
@@ -359,7 +359,7 @@
       const data = await res.json();
 
       if (data.found && data.multiple) {
-        // 下4桁検索などで候補が複数ある場合は一覧表示し、タップで選択する
+        // 下6桁検索などで候補が複数ある場合は一覧表示し、タップで選択する
         lastProductCode = "";
         const cards = data.items.map((it, idx) => `
           <div class="candidate" data-idx="${idx}">
